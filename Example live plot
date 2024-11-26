@@ -1,0 +1,380 @@
+# -*- coding: utf-8 -*-
+"""
+Code basis from https://github.com/shaybox/riden.git
+"""
+
+fw = 1 # # Firmware V1.43.1k or higher needed, else put to 0, also change in riden.py
+
+
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib.ticker import FormatStrFormatter
+import datetime
+from riden import Riden
+import numpy as np
+import os
+import csv
+from matplotlib.widgets import TextBox
+t_Start_date = datetime.datetime.now()
+timestring_file = datetime.datetime.now().strftime('%Y.%m.%d %H-%M-%S')
+timestring_csv = t_Start_date.strftime("%Y.%m.%d %H:%M:%S")
+
+# enter the right port here, this is for windows
+r = Riden(port="COM3", baudrate=115200, address=1)
+print(r.is_buzz())
+r.set_buzz(0) # no sound please!
+print(r.is_buzz())
+#print("V_set=", r.get_v_set())
+#r.set_v_set(1.70)
+#r.set_i_set(0.20)
+
+r.update()
+print("V_set=", r.v_set)
+print("V_out=", r.v_out)
+print("I_set=", r.i_set)
+print("I_out=", r.i_out)
+#r.set_output(0)
+#time.sleep(0.2)
+V_out = r.v_out
+I_out = r.i_out
+P_out = V_out * I_out
+mAh_output = 0
+Wh_output = 0
+T_bat = r.ext_c
+print(r.get_ext_c())
+xs = [0, 0]
+xs_plot = [0]
+I_out_array = [0]
+V_out_array = [0]
+P_out_array = [0]
+mAh_output_array = [0]
+Wh_output_array = [0]
+T_bat_array = [0]
+V_input_array = [0, 0]
+I_input_array = [0, 0]
+mAh_input_estimate = 0
+Wh_input_estimate = 0
+
+mAh_input = 0 #in mAh
+Wh_input = 0 #in Wh
+
+
+I_out_array.append(I_out)
+V_out_array.append(V_out)
+P_out_array.append(P_out)
+mAh_output_array.append(mAh_output)
+Wh_output_array.append(Wh_output)
+T_bat_array.append(T_bat)
+
+#pid.setpoint = 3 #Watt
+
+
+# Create figure for plotting
+fig, ax1 = plt.subplots(1)
+ax2 = ax1.twinx() # create a second y-axis sharing the same x-axis
+ax3 = ax1.twinx()
+#ax4 = ax1.twinx()
+# Offset the right spine of ax3 to put it on the left of ax2
+#ax3.spines["right"].set_position(("axes", 0.8))
+#ax3.spines["left"].set_position(("axes", 0.0))
+#ax4.spines["right"].set_position(("axes", 0.0))
+
+# Move the tick labels of ax3 to the left of its own spine
+ax3.yaxis.tick_left()
+ax3.yaxis.set_label_position("left")
+ax3.tick_params(axis='y', which='both', direction='out')
+ax3.spines["left"].set_position(("axes", 1.0))
+fig.tight_layout()
+
+# Set tick labels for ax3
+#ax3.set_yticks([0, 5, 10])
+#ax3.set_ylabel('ax3')
+
+n=[0]
+n_slice = [1]
+t_start=datetime.datetime.now()
+t_previous = 0.0
+
+
+
+# Create space for text boxes
+plt.subplots_adjust(left=0.1, bottom=0.25)
+
+# Initial y-axis limits
+lower_I_init = 0
+upper_I_init = 1
+lower_V_init = 0
+upper_V_init = 1
+
+# Create text boxes
+axbox_lower_I = plt.axes([0.1, 0.1, 0.1, 0.05])
+axbox_upper_I = plt.axes([0.3, 0.1, 0.1, 0.05])
+axbox_lower_V = plt.axes([0.1, 0.05, 0.1, 0.05])
+axbox_upper_V = plt.axes([0.3, 0.05, 0.1, 0.05])
+
+text_lower_I = TextBox(axbox_lower_I, 'Lower I', initial=str(lower_I_init))
+text_upper_I = TextBox(axbox_upper_I, 'Upper I', initial=str(upper_I_init))
+text_lower_V = TextBox(axbox_lower_V, 'Lower V', initial=str(lower_V_init))
+text_upper_V = TextBox(axbox_upper_V, 'Upper V', initial=str(upper_V_init))
+
+lower_I = lower_I_init
+upper_I = upper_I_init
+lower_V = lower_V_init
+upper_V = upper_V_init
+
+def submit_lower_I(text):
+    global lower_I
+    try:
+        lower_I = float(text)
+    except ValueError:
+        lower_I = lower_I_init
+
+def submit_upper_I(text):
+    global upper_I
+    try:
+        upper_I = float(text)
+    except ValueError:
+        upper_I = upper_I_init
+
+def submit_lower_V(text):
+    global lower_V
+    try:
+        lower_V = float(text)
+    except ValueError:
+        lower_V = lower_V_init
+
+def submit_upper_V(text):
+    global upper_V
+    try:
+        upper_V = float(text)
+    except ValueError:
+        upper_V = upper_V_init
+text_lower_I.on_submit(submit_lower_I)
+text_upper_I.on_submit(submit_upper_I)
+text_lower_V.on_submit(submit_lower_V)
+text_upper_V.on_submit(submit_upper_V) 
+        
+
+def update_mAh_estimate(filename, timestring_csv, mAh, Wh, start=False):
+    if os.path.isfile(filename):
+        # If the file exists, read all lines
+        with open(filename, 'r') as file:
+            lines = file.readlines()
+        data = f"{timestring_csv}, {mAh}, {Wh}\n"
+        # If the program just started, append a new line, else update the last line
+        if start and lines:
+            lines.append(data)
+        else:
+            lines[-1] = data
+
+        # Write the lines back to the file
+        with open(filename, 'w') as file:
+            file.writelines(lines)
+    else:
+        # If the file doesn't exist, create it and write the data
+        with open(filename, 'w') as file:
+            file.write(data)
+            
+def write_to_csv(filename, data, fields):
+    # Generate the filename
+    file_exists = os.path.isfile(filename)
+
+    # Check if file exists
+    if file_exists:
+        try:
+            # Try appending to existing file
+            with open(filename, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(data)
+        except:
+            # If write fails, try a new filename
+            filename_parts = filename.split('.')
+            filename_parts[-2] += "_1"
+            new_filename = '.'.join(filename_parts)
+            write_to_csv(new_filename, data, fields)
+    else:
+        try:
+            # Try writing to new file
+            with open(filename, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                # Write the headers if it's a new file
+                writer.writerow(fields)
+                writer.writerow(data)
+        except:
+            # If writing to a new file fails, print to console
+            print("Failed to write to file, printing data to console")
+            print(','.join(str(x) for x in data))
+            
+
+
+def measure_func():
+    t = (datetime.datetime.now()-t_start).total_seconds()
+    global t_previous, mAh_input_estimate, Wh_input_estimate
+    dt = t - t_previous
+    t_previous = t
+    
+    r.update()
+    #V_set = r.v_set
+    V_out = r.v_out
+    V_bat = r.v_bat
+    
+    if fw >= 1:
+        V_out_raw = r.adc_output_voltage
+        I_out_raw = r.adc_output_current
+        V_bat_raw = r.adc_battery_voltage
+        T_sys_raw = r.adc_system_temp
+        T_bat_raw = r.adc_battery_temp
+        
+    I_out = r.i_out
+    P_out = V_out * I_out
+    if len(mAh_output_array) < 1:
+        mAh_output = (I_out * dt / 3.6) #in mAh
+        Wh_output = (P_out * dt / 3600.) #in Wh
+    else:
+        mAh_output = mAh_output_array[-1] + (I_out * dt / 3.6) #in mAh
+        Wh_output = Wh_output_array[-1] + (P_out * dt / 3600.) #in mAh
+    T_bat = r.ext_c
+    T_int = r.int_c
+    is_output_on = r.is_output()
+    # Possible PID implementation to controll power to something
+    #Power = V_out * I_out
+    #PID_output = pid(Power)
+    #r.set_v_set(PID_output)
+
+    xs.append(t)
+    I_out_array.append(I_out)
+    if is_output_on == 1:
+        V_out_array.append(V_out)
+    else:
+        V_out_array.append(V_bat)
+    P_out_array.append(P_out)
+    mAh_output_array.append(mAh_output)
+    Wh_output_array.append(Wh_output)
+    T_bat_array.append(T_bat)
+    #print(V_out_array, mAh_output_array)
+    V_input = r.v_in
+
+    
+    t_now = datetime.datetime.now()
+    timestring = t_now.strftime("%Y.%m.%d %H:%M:%S")         #z.B. 2021.01.01 09:34:10        
+    sec_string = ", {:4.1f} s".format(t)
+    if t > 7200:
+        t = t/3600
+        sec_string = ", {:4.2f} h".format(t)
+    if T_bat > 0:
+        T_string = ", {:3.0f}/{:3.0f} °C".format(T_int, T_bat)
+    else:
+        T_string = ""
+    
+    if fw >= 1:
+        print("{}{}, {:7.4f} A, {:7.3f} /{:6.2f} V, {:7.2f} W, {:7.2f} mAh, {:7.3f} Wh{}, {:5.2f} V_in, Sys/Bat: {}/{} °C".format(
+            timestring, sec_string, I_out, V_out, V_bat, P_out, mAh_output, Wh_output, T_string, V_input, T_int, T_bat))
+    else:
+        print("{}{}, {:7.4f} A, {:7.3f}/{:7.2f} V, {:7.2f} W, {:7.2f} mAh, {:7.3f} Wh{}".format(
+            timestring, sec_string, I_out, V_out, V_bat, P_out, mAh_output, Wh_output, T_string))
+    
+    
+    efficiency_estimate = 0.9
+    I_input_estimate = (P_out / V_input)/efficiency_estimate
+    V_input_array.append(V_input)
+    I_input_array.append(I_input_estimate)
+    P_input_estimate = V_input*I_input_estimate
+    trapz_voltage = (V_input_array[-1]+V_input_array[-2])/2
+    trapz_current = (I_input_array[-1]+I_input_array[-2])/2
+    mAh_input_estimate += trapz_current * dt / 3.6
+    Wh_input_estimate += trapz_voltage * trapz_current * dt / 3600.
+    
+    #timestring = datetime.datetime.now().strftime("%Y.%m.%d %H:%M:%S")
+    
+    data = [timestring, xs[-1],
+            V_out, I_out, P_out, mAh_output, Wh_output, 
+            V_bat, V_bat_raw, T_bat, T_bat_raw,
+            V_input, I_input_estimate, P_input_estimate, mAh_input_estimate, Wh_input_estimate,
+            V_out_raw, I_out_raw, T_int, T_sys_raw]
+    
+    filename = f"RD6006P_{timestring_file}.csv"
+    write_to_csv(filename, data, headerdata)
+    return (I_out_array, V_out_array, P_out_array, mAh_output_array, Wh_output_array, 
+            T_bat_array)
+
+
+# This function is called periodically from FuncAnimation
+#print("t, A, V, W, mAh, Wh, T")
+headerdata = ["date", "sec", 
+              "RD V_out", "RD I_out", "RD P_out", "RD mAh_out", "RD Wh_out", 
+              "RD Bat_in", "RD Bat_in_raw", "RD T_bat", "RD T_bat_raw",
+              "RD V_in", "RD I_in_est", "RD P_in_est", "RD mAh_in_est", "RD Wh_in_est", 
+              "RD V_out_raw", "RD I_out_raw", "RD T_int", "RD T_int_raw"]
+#print(headerdata)
+
+def animate(i, xs, I_out_array, V_out_array):
+    
+    
+    (I_out_array, V_out_array, P_out_array, mAh_output_array, Wh_output_array, 
+     T_bat_array) = measure_func()
+    
+
+    
+    # Clear axes
+    ax1.clear()
+    ax2.clear()
+    ax3.clear()
+    #ax4.clear()
+    
+    ax1.tick_params(axis='y', colors='b')
+    ax2.tick_params(axis='y', colors='r')
+    
+    ax3.yaxis.tick_left()
+    ax3.yaxis.set_label_position("left")
+    ax3.tick_params(axis='y', which='both', direction='out', colors='c')
+    ax3.spines["left"].set_position(("axes", 1.0))
+    
+    #ax4.spines["right"].set_position(("axes", 0.0))
+    #ax4.tick_params(axis='y', colors='g')
+    
+    #[::10] = take every 10th element
+    n_slice = 1
+    threshold = 2000
+    if len(xs) > threshold:
+        n_slice = round(len(xs) / threshold)
+    xs_slice = xs[::n_slice]
+    xs_plot = xs_slice
+    ax1.plot(xs_plot, I_out_array[::n_slice], 'b-', label='I_out')
+    ax2.plot(xs_plot, V_out_array[::n_slice], 'r-', label='V_out')
+    ax3.plot(xs_plot, mAh_output_array[::n_slice], 'c-', label='mAh')
+    #ax4.plot(xs, T_bat_array, 'g-', label='°C')
+    
+    min_3 = 0
+    max_3 = np.max(mAh_output_array)
+    if min_3 == max_3:
+        max_3 = min_3+1
+        
+    #ax1.set_ylim(ymin=0, ymax=upper_I)
+    #ax2.set_ylim(ymin=0, ymax=upper_V)
+    #ax3.set_ylim(ymin=0, ymax=max_3)  
+    ax1.set_ylim(ymin=lower_I, ymax=upper_I)
+    ax2.set_ylim(ymin=lower_V, ymax=upper_V)
+    ax3.set_ylim(ymin=0, ymax=max_3*1.05)
+    
+    ax1.xaxis.set_major_formatter(FormatStrFormatter('%g s'))
+    ax1.yaxis.set_major_formatter(FormatStrFormatter('%g A'))
+    ax2.yaxis.set_major_formatter(FormatStrFormatter('%g V'))
+    ax3.yaxis.set_major_formatter(FormatStrFormatter('%g mAh'))
+    #ax4.yaxis.set_major_formatter(FormatStrFormatter('%g °C'))
+    
+    #if xs_slice[-1] > 7200:
+    #    ax1.xaxis.set_major_formatter(FormatStrFormatter('%g h'))
+    # Add legends
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    lines3, labels3 = ax3.get_legend_handles_labels()
+    #lines4, labels4 = ax4.get_legend_handles_labels()
+    #ax1.legend(lines1 + lines2 + lines3 + lines4, labels1 + labels2 + labels3 + labels4, loc='best')
+    ax1.legend(lines1 + lines2 + lines3, labels1 + labels2 + labels3, loc='best')
+    #fig.tight_layout()
+
+
+ani = animation.FuncAnimation(fig, animate, fargs=(xs, I_out_array, V_out_array), 
+                              interval=770, save_count=10)
+
+plt.show()
